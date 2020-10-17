@@ -1,0 +1,211 @@
+---
+title: "Exploratory Analysis"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+
+knitr::opts_chunk$set(
+  fig.width = 6,
+  fig.asp = .6,
+  out.width = "90%"
+)
+
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis"
+)
+
+scale_colour_discrete = scale_color_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+```
+
+## Load the weather dataset
+
+```{r}
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728", "USC00519397", "USS0023B17S"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(
+      id, 
+      USW00094728 = "CentralPark_NY", 
+      USC00519397 = "Waikiki_HA",
+      USS0023B17S = "Waterhole_WA"),
+    tmin = tmin / 10,
+    tmax = tmax / 10,
+    month = lubridate::floor_date(date, unit = "month")) %>%
+  select(name, id, everything())
+```
+
+## group_by
+
+```{r}
+weather_df %>% 
+  group_by(name, month) %>% 
+  ungroup()
+```
+
+## Counting things
+
+Count month and name observations:
+
+```{r}
+weather_df %>% 
+  group_by(name, month) %>% 
+  summarize(nobs = n())
+```
+
+we can also use `count()`
+
+```{r}
+weather_df %>% 
+  count(name, month, name = "n_obs")
+```
+
+Never use base r's `table`! The result is not helpful and to get to the table function you have to do extra steps.
+
+```{r, eval=FALSE}
+weather_df %>% 
+  pull (month) %>% 
+  table()
+```
+
+Other helpful counters:
+
+```{r}
+weather_df %>% 
+  group_by(month) %>% 
+  summarize(
+    n_obs = n(),
+    n_days = n_distinct(date)
+  )
+```
+
+## A digression on 2x2 tables
+
+```{r}
+weather_df %>% 
+  filter(name != "Waikiki_HA") %>% 
+  mutate(
+    cold = case_when(
+      tmax < 5 ~ "cold",
+      tmax >= 5 ~ "not_cold",
+      TRUE ~ ""
+    )
+  ) %>% 
+  group_by(name, cold) %>% 
+  summarize(count = n())
+
+weather_df %>% 
+  filter(name != "Waikiki_HA") %>% 
+  mutate(
+    cold = case_when(
+      tmax < 5 ~ "cold",
+      tmax >= 5 ~ "not_cold",
+      TRUE ~ ""
+    )
+  ) %>% 
+  janitor::tabyl(name, cold)
+```
+
+## General summaries
+
+You can do lots of summaries:
+
+```{r}
+weather_df %>% 
+  group_by(name, month) %>% 
+  summarize(
+    mean_tmax = mean(tmax, na.rm = TRUE),
+    mean_prcp = mean(prcp, na.rm = TRUE),
+    median_tmin = median(tmin, na.rm = TRUE)
+  )
+```
+
+This is a data frame! So you can make a plot:
+
+```{r}
+weather_df %>% 
+  group_by(name, month) %>% 
+  summarize(
+    mean_tmax = mean(tmax, na.rm = TRUE),
+    mean_prcp = mean(prcp, na.rm = TRUE),
+    median_tmin = median(tmin, na.rm = TRUE)
+  ) %>% 
+  ggplot(aes(x = month, y = mean_tmax, color = name)) +
+  geom_point() +
+  geom_line()
+```
+
+Suppose you want to summarise multiple columns in the same way:
+
+```{r}
+weather_df %>% 
+  group_by(name, month) %>% 
+  summarize(across(prcp:tmin, mean))
+```
+
+Reminder: some of the data results are easier to read in another format.
+
+```{r}
+weather_df %>% 
+  group_by(name, month) %>% 
+  summarize(mean_tmax = mean(tmax)) %>% 
+  pivot_wider(
+    names_from = name,
+    values_from = mean_tmax
+  ) %>% 
+  knitr::kable(digits = 1)
+```
+
+##`group_by` and `mutate`
+
+```{r}
+weather_df %>% 
+  group_by(name) %>% 
+  mutate(
+    mean_tmax = mean(tmax, na.rm = TRUE),
+    centered_tmax = tmax - mean_tmax
+  ) %>% 
+  ggplot(aes(x = date, y = centered_tmax, color = name)) +
+  geom_point()
+```
+
+What about window functions?
+
+Rank the coldest days and filter by the coldest day and then switch the order:
+
+```{r}
+weather_df %>% 
+  group_by(name, month) %>% 
+  mutate(temp_rank = min_rank(tmax)) %>% 
+  filter(temp_rank == 1)
+
+weather_df %>% 
+  group_by(name, month) %>% 
+  mutate(temp_rank = min_rank(desc(tmax)))
+```
+
+Lag:
+
+```{r}
+weather_df %>% 
+  group_by(name) %>% 
+  mutate(temp_change = tmax - lag(tmax)) %>% 
+  summarize(
+    temp_change_max = max(temp_change, na.rm = TRUE),
+    temp_change_sd = sd(temp_change, na.rm = TRUE)
+  )
+```
+
+## Quick note
+
+Summarize only get's you so far.
+
